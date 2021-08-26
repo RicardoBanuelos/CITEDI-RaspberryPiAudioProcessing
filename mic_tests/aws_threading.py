@@ -18,9 +18,9 @@ IoT_protocol_name = "x-amzn-mqtt-ca"
 aws_iot_endpoint = "a5r6qbrsvpf9k-ats.iot.us-east-1.amazonaws.com"
 url = "https://{}".format(aws_iot_endpoint)
 
-ca = "/home/pi/Training/aws/AmazonRootCA1.pem" 
-cert = "/home/pi/Training/aws/0b5df1387020987a0145ad6eafed2a99f03fd2ea1966da35ff58b1b8f226fc34-certificate.pem.crt.txt"
-private = "/home/pi/Training/aws/0b5df1387020987a0145ad6eafed2a99f03fd2ea1966da35ff58b1b8f226fc34-private.pem.key"
+ca = "/home/pi/CITEDI-RASPBERRYPIAUDIOPROCESSING/mic_tests/aws/AmazonRootCA1.pem" 
+cert = "/home/pi/CITEDI-RASPBERRYPIAUDIOPROCESSING/mic_tests/Training/aws/0b5df1387020987a0145ad6eafed2a99f03fd2ea1966da35ff58b1b8f226fc34-certificate.pem.crt.txt"
+private = "/home/pi/CITEDI-RASPBERRYPIAUDIOPROCESSING/mic_tests/aws/0b5df1387020987a0145ad6eafed2a99f03fd2ea1966da35ff58b1b8f226fc34-private.pem.key"
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)

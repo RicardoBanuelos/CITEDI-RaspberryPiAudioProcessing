@@ -6,9 +6,6 @@ from os import system
 import pyaudio 
 import wave
 
-def clear():
-    _ = system("clear")
-
 ERROR_HANDLER_FUNC = CFUNCTYPE(None, c_char_p, c_int, c_char_p, c_int, c_char_p)
 def py_error_handler(filename, line, function, err, fmt):
     pass
@@ -25,7 +22,6 @@ def no_alsa_err():
 # Instancia de PyAudio mas una limpia de la terminal
 with no_alsa_err():
     audio = pyaudio.PyAudio()
-    clear()
 
 form_1 = pyaudio.paInt16                # Resolucion de 16 bits
 chans = 1                               # 1 canal
