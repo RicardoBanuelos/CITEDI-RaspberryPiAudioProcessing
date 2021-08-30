@@ -13,6 +13,21 @@ from hmmlearn import hmm
 from python_speech_features import mfcc
 import joblib
 
+np.seterr(divide = 'ignore') 
+
+ERROR_HANDLER_FUNC = CFUNCTYPE(None, c_char_p, c_int, c_char_p, c_int, c_char_p)
+def py_error_handler(filename, line, function, err, fmt):
+    pass
+
+c_error_handler = ERROR_HANDLER_FUNC(py_error_handler)
+
+@contextmanager
+def no_alsa_err():
+    asound = cdll.LoadLibrary("libasound.so")
+    asound.snd_lib_error_set_handler(c_error_handler)
+    yield
+    asound.snd_lib_error_set_handler(None)
+
 # Class to handle all HMM related processing
 class HMMTrainer(object):
     def __init__(self, model_name='GaussianHMM', n_components=4, cov_type='diag', n_iter=1000):
@@ -37,8 +52,6 @@ class HMMTrainer(object):
     def get_score(self, input_data):
         return self.model.score(input_data)
 
-np.seterr(divide = 'ignore') 
-
 def clear():
     _ = system("clear")
 
@@ -59,31 +72,11 @@ def rms_to_decibels(rms):
     else:
         return 20*math.log10(rms) + 88
 
-hmm_models = joblib.load("HMMmodels.pkl")
-
-ERROR_HANDLER_FUNC = CFUNCTYPE(None, c_char_p, c_int, c_char_p, c_int, c_char_p)
-def py_error_handler(filename, line, function, err, fmt):
-    pass
-
-c_error_handler = ERROR_HANDLER_FUNC(py_error_handler)
-
-@contextmanager
-def no_alsa_err():
-    asound = cdll.LoadLibrary("libasound.so")
-    asound.snd_lib_error_set_handler(c_error_handler)
-    yield
-    asound.snd_lib_error_set_handler(None)
-
-# Instancia de PyAudio mas una limpia de la terminal
-with no_alsa_err():
-    audio = pyaudio.PyAudio()
-    clear()
-
 def classify_sound(frames):
     wf = wave.open("frames.wav", "wb")
-    wf.setnchannels(1)
-    wf.setsampwidth(audio.get_sample_size(pyaudio.paInt16))
-    wf.setframerate(44100)
+    wf.setnchannels(chans)
+    wf.setsampwidth(audio.get_sample_size(form_1))
+    wf.setframerate(samp_rate)
     wf.writeframes(b''.join(frames))
     wf.close()
 
@@ -104,37 +97,47 @@ def classify_sound(frames):
     else: 
         return output_label
 
-form_1 = pyaudio.paInt16                # Resolucion de 16 bits
-chans = 1                               # 1 canal
-samp_rate = 44100                       # 44.1 KHz muestras
-chunk = 4096                            # 2^12 muestras para el buffer
-dev_index = 2                           # Indice encontrado por p.get_device_info_by_index(i)
-
-# Creamos stream de pyaudio
-stream = audio.open(
-    format = form_1,
-    channels = chans,
-    rate = samp_rate,
-    input_device_index = dev_index,
-    input = True,
-    frames_per_buffer = chunk
-)
-
 if __name__=="__main__":
-    print("Recording...")
+    
+    form_1 = pyaudio.paInt16                # Resolucion de 16 bits
+    chans = 1                               # 1 canal
+    samp_rate = 16000                       # 44.1 KHz muestras
+    duration = 2                            # Duracion de la grabacion
+    chunk = samp_rate*3                     # Cantidad de muestras
+
+    # Instancia de PyAudio mas una limpia de la terminal
+    with no_alsa_err():
+        audio = pyaudio.PyAudio()
+        clear()
+
+    # Codigo para encontrar el indice del dispositivo que buscamos
+    for i in range(audio.get_device_count()):
+        print(audio.get_device_info_by_index(i))
+        
+    dev_index = int(input("Seleccion el indice de tu dispositivo: "))
+
+    # Creamos stream de pyaudio
+    stream = audio.open(
+        format = form_1,
+        channels = chans,
+        rate = samp_rate,
+        input_device_index = dev_index,
+        input = True,
+        frames_per_buffer = chunk
+    )
+
+    hmm_models = joblib.load("HMMmodels.pkl")
+
     try: 
         print("Press Ctrl + C to terminate program.")
         i = 0
         while True: 
             dB = 0.0
-            frames = []
-            for i in range(0, int(samp_rate/chunk)*2):
-                data = stream.read(chunk, exception_on_overflow=False)
-                frames.append(data)
-                rms = get_rms(data)
-                dB += rms_to_decibels(rms)
-            dB /= int(samp_rate/chunk)*2
+            data = stream.read(chunk, exception_on_overflow=False)
+            rms = get_rms(data)
+            dB += rms_to_decibels(rms)
             print("dB: "+str(dB))
+            frames = np.frombuffer(data, dtype="int16")
             if(dB > 20):
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     prediction = executor.submit(classify_sound, frames)
