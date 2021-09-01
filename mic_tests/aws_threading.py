@@ -31,10 +31,9 @@ logger.addHandler(handler)
 
 form_1 = pyaudio.paInt16                # Resolucion de 16 bits
 chans = 1                               # 1 canal
-samp_rate = 44100                       # 44.1 KHz muestras
-chunk = 4096                            # 2^12 muestras para el buffer
-record_secs = 5                         # Segundos a grabar
-dev_index = 0                           # Indice encontrado por p.get_device_info_by_index(i)
+samp_rate = 16000                       # 44.1 KHz muestras
+duration = 2                            # Duracion de la grabacion
+chunk = samp_rate*3                     # Cantidad de muestras
 
 np.seterr(divide = 'ignore') 
 
@@ -94,6 +93,12 @@ with no_alsa_err():
     audio = pyaudio.PyAudio()
     clear()
 
+# Codigo para encontrar el indice del dispositivo que buscamos
+for i in range(audio.get_device_count()):
+    print(audio.get_device_info_by_index(i))
+        
+dev_index = int(input("Seleccion el indice de tu dispositivo: "))
+
 # Creamos stream de pyaudio
 stream = audio.open(
     format = form_1,
@@ -105,14 +110,12 @@ stream = audio.open(
 )
 
 mqtt_object = {
-    "latitude": 32.5391048875214250,
-    "longitude": -116.94272323069949,
-    "Level": 0.0,
-    "sensorName": "Logitech Pro X Gaming Headset"
+    "DeviceID": "UABC1",
+    "soundIntensity": 0.0,
 }
 
 if __name__ == '__main__':
-    topic = "sensor/soundTester"
+    topic = "aws/sensors/soundIntensityDevices"
 
     try:
         mqttc = mqtt.Client()
@@ -128,14 +131,11 @@ if __name__ == '__main__':
             i = 0
             while True:
                 dB = 0.0
-                frames = []
-                for i in range(0, int(samp_rate/chunk)*2):
-                    data = stream.read(chunk, exception_on_overflow = False)
-                    frames.append(data)
-                    rms = get_rms(data)
-                    dB += rms_to_decibels(rms)
-                dB /= int(samp_rate/chunk)
+                data = stream.read(chunk, exception_on_overflow=False)
+                rms = get_rms(data)
+                dB += rms_to_decibels(rms)
                 print("dB: "+str(dB))
+                frames = np.frombuffer(data, dtype="int16")
                 mqtt_object["Level"] = dB
                 now = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
                 logger.info("try to publish:{}".format(now))
