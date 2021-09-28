@@ -15,12 +15,14 @@ import struct
 import time
 
 IoT_protocol_name = "x-amzn-mqtt-ca"
-aws_iot_endpoint = "a5r6qbrsvpf9k-ats.iot.us-east-1.amazonaws.com"
+aws_iot_endpoint = "a19mplqw6xosam-ats.iot.us-east-1.amazonaws.com"
 url = "https://{}".format(aws_iot_endpoint)
 
-ca = "/home/pi/CITEDI-RASPBERRYPIAUDIOPROCESSING/mic_tests/aws/AmazonRootCA1.pem" 
-cert = "/home/pi/CITEDI-RASPBERRYPIAUDIOPROCESSING/mic_tests/Training/aws/0b5df1387020987a0145ad6eafed2a99f03fd2ea1966da35ff58b1b8f226fc34-certificate.pem.crt.txt"
-private = "/home/pi/CITEDI-RASPBERRYPIAUDIOPROCESSING/mic_tests/aws/0b5df1387020987a0145ad6eafed2a99f03fd2ea1966da35ff58b1b8f226fc34-private.pem.key"
+ca = "/home/pi/CITEDI-RaspberryPiAudioProcessing/mic_tests/aws/AmazonRootCA1.pem" 
+cert = "/home/pi/CITEDI-RaspberryPiAudioProcessing/mic_tests/aws/fb82195cfab8075053229cf7cf0cb3100546168d88f62f232bffb72aa3b4d5ca-certificate.pem.crt"
+private = "/home/pi/CITEDI-RaspberryPiAudioProcessing/mic_tests/aws/fb82195cfab8075053229cf7cf0cb3100546168d88f62f232bffb72aa3b4d5ca-private.pem.key"
+
+print(ca)
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -31,7 +33,7 @@ logger.addHandler(handler)
 
 form_1 = pyaudio.paInt16                # Resolucion de 16 bits
 chans = 1                               # 1 canal
-samp_rate = 16000                       # 44.1 KHz muestras
+samp_rate = 44100                       # 44.1 KHz muestras
 duration = 2                            # Duracion de la grabacion
 chunk = samp_rate*3                     # Cantidad de muestras
 
@@ -71,8 +73,8 @@ def rms_to_decibels(rms):
     else:
         return 20*math.log10(rms) + 76
 
-def do_something(frames):
-    print(frames)
+def do_something():
+    return 'Hola Mundo'
 
 
 ERROR_HANDLER_FUNC = CFUNCTYPE(None, c_char_p, c_int, c_char_p, c_int, c_char_p)
@@ -110,12 +112,12 @@ stream = audio.open(
 )
 
 mqtt_object = {
-    "DeviceID": "UABC1",
+    "deviceId": "UABC12",
     "soundIntensity": 0.0,
 }
 
 if __name__ == '__main__':
-    topic = "aws/sensors/soundIntensityDevices"
+    topic = "aws/soundDevices"
 
     try:
         mqttc = mqtt.Client()
@@ -136,14 +138,15 @@ if __name__ == '__main__':
                 dB += rms_to_decibels(rms)
                 print("dB: "+str(dB))
                 frames = np.frombuffer(data, dtype="int16")
-                mqtt_object["Level"] = dB
+                mqtt_object["soundIntensity"] = dB
                 now = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
                 logger.info("try to publish:{}".format(now))
                 queryStringParameters = json.dumps(mqtt_object)
                 mqttc.publish(topic, queryStringParameters)
                 if(dB > 20):
                     with concurrent.futures.ThreadPoolExecutor() as executor:
-                        executor.map(do_something, frames)
+                        prediction = executor.submit(do_something)
+                        print(prediction.result())
                 
         except KeyboardInterrupt:
             print("\nProgram terminated.")
