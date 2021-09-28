@@ -2,10 +2,16 @@ from contextlib import contextmanager
 from ctypes import *
 from os import system
 import concurrent.futures
+import datetime
+import json
 import math
 import numpy as np
+import logging, traceback
+import paho.mqtt.client as mqtt
 import pyaudio 
 import struct
+import ssl
+import sys
 import wave
 
 from scipy.io import wavfile
@@ -13,6 +19,40 @@ from hmmlearn import hmm
 from python_speech_features import mfcc
 import joblib
 
+# AWS setup so PAHO can connect to IoT Core
+IoT_protocol_name = "x-amzn-mqtt-ca"
+aws_iot_endpoint = "a19mplqw6xosam-ats.iot.us-east-1.amazonaws.com"
+url = "https://{}".format(aws_iot_endpoint)
+
+ca = "/home/pi/CITEDI-RaspberryPiAudioProcessing/aws/AmazonRootCA1.pem" 
+cert = "/home/pi/CITEDI-RaspberryPiAudioProcessing/aws/fb82195cfab8075053229cf7cf0cb3100546168d88f62f232bffb72aa3b4d5ca-certificate.pem.crt"
+private = "/home/pi/CITEDI-RaspberryPiAudioProcessing/aws/fb82195cfab8075053229cf7cf0cb3100546168d88f62f232bffb72aa3b4d5ca-private.pem.key"
+
+print(ca)
+
+# Paho MQTT setup
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler(sys.stdout)
+log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(log_format)
+logger.addHandler(handler)
+
+def ssl_alpn():
+    try:
+        #debug print opnessl version
+        logger.info("open ssl version:{}".format(ssl.OPENSSL_VERSION))
+        ssl_context = ssl.create_default_context()
+        ssl_context.set_alpn_protocols([IoT_protocol_name])
+        ssl_context.load_verify_locations(cafile=ca)
+        ssl_context.load_cert_chain(certfile=cert, keyfile=private)
+        return ssl_context
+
+    except Exception as e:
+        print("exception ssl_alpn()")
+        raise e
+
+# PyAudio error handler
 np.seterr(divide = 'ignore') 
 
 ERROR_HANDLER_FUNC = CFUNCTYPE(None, c_char_p, c_int, c_char_p, c_int, c_char_p)
@@ -52,6 +92,7 @@ class HMMTrainer(object):
     def get_score(self, input_data):
         return self.model.score(input_data)
 
+# Function to clear PyAudio terminal spam
 def clear():
     _ = system("clear")
 
@@ -70,8 +111,11 @@ def rms_to_decibels(rms):
     if rms == 0:
         return 0
     else:
-        return 20*math.log10(rms) + 88
+        return 20*math.log10(rms) + 80
 
+
+
+# Function that temporarily stores frames and classifies them 
 def classify_sound(frames):
     wf = wave.open("frames.wav", "wb")
     wf.setnchannels(chans)
@@ -98,12 +142,22 @@ def classify_sound(frames):
         return output_label
 
 if __name__=="__main__":
+
+    # JSON that will be sent
+    mqtt_object = {
+        "deviceId": "UABC12",
+        "soundIntensity": 0.0,
+    }
+
+    # Topic where our data will be sent
+    topic = "aws/soundDevices"
     
+    # PyAudio Input Data Setup
     form_1 = pyaudio.paInt16                # Resolucion de 16 bits
     chans = 1                               # 1 canal
-    samp_rate = 16000                       # 44.1 KHz muestras
-    duration = 2                            # Duracion de la grabacion
-    chunk = samp_rate*3                     # Cantidad de muestras
+    samp_rate = 44100                       # Muestras
+    duration = 1                            # Duracion de la grabacion
+    chunk = samp_rate*duration              # Cantidad de muestras
 
     # Instancia de PyAudio mas una limpia de la terminal
     with no_alsa_err():
@@ -128,26 +182,47 @@ if __name__=="__main__":
 
     hmm_models = joblib.load("HMMmodels.pkl")
 
-    try: 
-        print("Press Ctrl + C to terminate program.")
-        i = 0
-        while True: 
-            dB = 0.0
-            data = stream.read(chunk, exception_on_overflow=False)
-            rms = get_rms(data)
-            dB += rms_to_decibels(rms)
-            print("dB: "+str(dB))
-            frames = np.frombuffer(data, dtype="int16")
-            if(dB > 20):
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    prediction = executor.submit(classify_sound, frames)
-                    print("Predicted: " + prediction.result())
+    # Conexion de Paho MQTT a IoT core
+    try:
+        mqttc = mqtt.Client()
+        ssl_context= ssl_alpn()
+        mqttc.tls_set_context(context=ssl_context)
+        logger.info("start connect")
+        mqttc.connect(aws_iot_endpoint, port=443)
+        logger.info("connect success")
+        mqttc.loop_start()
 
-    except KeyboardInterrupt:
-        print("\nProgram terminated.")
-        # Cierra stream, y termina la instancia de pyaudio
-        stream.close()
-        audio.terminate()
-        pass
+        try: 
+            print("Press Ctrl + C to terminate program.")
+            i = 0
+            while True: 
+                dB = 0.0
+                data = stream.read(chunk, exception_on_overflow=False)
+                frames = np.frombuffer(data, dtype="int16")
+                rms = get_rms(data)
+                dB += rms_to_decibels(rms)
+                print("dB: "+str(dB))
+                mqtt_object["soundIntensity"] = dB
+                if(dB > 20):
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        prediction = executor.submit(classify_sound, frames)
+                        print("Predicted: " + prediction.result())
+                now = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+                logger.info("try to publish:{}".format(now))
+                queryStringParameters = json.dumps(mqtt_object)
+                mqttc.publish(topic, queryStringParameters)
+        except KeyboardInterrupt:
+            print("\nProgram terminated.")
+            pass
+
+    except Exception as e:
+        logger.error("exception main()")
+        logger.error("e obj:{}".format(vars(e)))
+        logger.error("message:{}".format(e.message))
+        traceback.print_exc(file=sys.stdout)
+
+    # Cierra stream, y termina la instancia de pyaudio
+    stream.close()
+    audio.terminate()
 
     
